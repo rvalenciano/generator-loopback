@@ -5,7 +5,7 @@ a [loopback](http://loopback.io/) application.
 
 ## Getting Started
 
- * Install: `npm install -g generator-loopback`
+ * Install: `npm install -g generator-loopback-automated`
  * Run `yo loopback`
  * Run `node .` to start the scaffolded server
 

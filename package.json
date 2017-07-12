@@ -1,6 +1,6 @@
 {
   "name": "generator-loopback-automated",
-  "version": "3.9.1",
+  "version": "3.9.2",
   "description": "Yeoman generator for LoopBack with automated answers",
   "license": "MIT",
   "main": "app/index.js",

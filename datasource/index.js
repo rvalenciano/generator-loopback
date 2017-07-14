@@ -29,7 +29,7 @@ module.exports = yeoman.Base.extend({
 
   loadProject: actions.loadProject,
 
-  constructor: function() {
+  constructor: function () {
     yeoman.Base.apply(this, arguments);
     this.abort = false;
     this.option('bluemix', {
@@ -42,6 +42,12 @@ module.exports = yeoman.Base.extend({
       default: false,
     });
 
+    this.option('automate', {
+      desc: g.f('Scaffold datasource automatically with default options.'),
+      required: false,
+      type: String,
+    });
+
     this.option('sso', {
       desc: g.f('Log into Bluemix with SSO'),
       type: Boolean,
@@ -52,27 +58,33 @@ module.exports = yeoman.Base.extend({
       required: false,
       type: String,
     });
+
+    this.argument('type', {
+      desc: g.f('Type of the datasource to create.'),
+      required: false,
+      type: String,
+    });
   },
 
-  help: function() {
+  help: function () {
     return helpText.customHelp(this, 'loopback_datasource_usage.txt');
   },
 
-  setAppName: function() {
+  setAppName: function () {
     // https://github.com/strongloop/generator-loopback/issues/38
     // yeoman-generator normalize the appname with ' '
     this.appName =
       path.basename(process.cwd()).replace(/[\/@\s\+%:\.]+?/g, '-');
   },
 
-  loadConnectors: function() {
+  loadConnectors: function () {
     var done = this.async();
-    wsModels.Workspace.listAvailableConnectors(function(err, list) {
+    wsModels.Workspace.listAvailableConnectors(function (err, list) {
       if (err) {
         return done(err);
       }
 
-      this.listOfAvailableConnectors = list.map(function(c) {
+      this.listOfAvailableConnectors = list.map(function (c) {
         var support = c.supportedByStrongLoop ?
           g.f(' (supported by StrongLoop)') :
           g.f(' (provided by community)');
@@ -83,12 +95,12 @@ module.exports = yeoman.Base.extend({
       });
 
       var availableConnectors = this.availableConnectors = {};
-      list.forEach(function(c) {
+      list.forEach(function (c) {
         availableConnectors[c.name] = c;
       });
 
       var connectorSettings = this.connectorSettings = {};
-      list.forEach(function(c) {
+      list.forEach(function (c) {
         connectorSettings[c.name] = c.settings;
       });
 
@@ -96,28 +108,48 @@ module.exports = yeoman.Base.extend({
     }.bind(this));
   },
 
-  askForName: function() {
+  askForName: function () {
+    if (this.name) {
+      this.name = this.name;
+      if (this.options.automate) {
+        this.name = 'postgresql';
+      }
+      return;
+    }
     if (!this.options.bluemix) {
-      var prompts = [
-        {
-          name: 'name',
-          message: g.f('Enter the datasource name:'),
-          default: this.name,
-          validate: validateRequiredName,
-        },
-      ];
-      return this.prompt(prompts).then(function(props) {
+      var prompts = [{
+        name: 'name',
+        message: g.f('Enter the datasource name:'),
+        default: this.name,
+        validate: validateRequiredName,
+      }, ];
+      return this.prompt(prompts).then(function (props) {
         this.name = props.name;
       }.bind(this));
     }
   },
 
-  askForParameters: function() {
+  listOfAvailableConnectorsValues: function () {
+    var values = this.listOfAvailableConnectors.map(function (obj) {
+      return obj.value;
+    });
+    return values;
+  },
+
+  askForParameters: function () {
+    if (this.type) {
+      if (this.listOfAvailableConnectorsValues().includes(this.type)) {
+        this.connector = this.type;
+        return;
+      } else {
+        this.env.error('Invalid type of connecto sent as argument');
+      }
+    }
+
     if (!this.options.bluemix) {
       var displayName = chalk.yellow(this.name);
       var connectorChoices = this.listOfAvailableConnectors.concat(['other']);
-      var prompts = [
-        {
+      var prompts = [{
           name: 'connector',
           message: g.f('Select the connector for %s:', displayName),
           type: 'list',
@@ -126,56 +158,78 @@ module.exports = yeoman.Base.extend({
         },
         {
           name: 'customConnector',
-          message:
-            g.f('Enter the connector\'s module name'),
+          message: g.f('Enter the connector\'s module name'),
           validate: validateRequiredName,
-          when: function(answers) {
+          when: function (answers) {
             return answers.connector === 'other';
           },
         },
       ];
 
-      return this.prompt(prompts).then(function(props) {
+      return this.prompt(prompts).then(function (props) {
         this.connector = props.customConnector || props.connector;
       }.bind(this));
     }
   },
 
-  loginToBluemix: function() {
-    if (this.options.bluemix) { bx.login.apply(this); }
+  loginToBluemix: function () {
+    if (this.options.bluemix) {
+      bx.login.apply(this);
+    }
   },
 
   generateBluemixFiles: bx.generateFiles,
 
-  selectBluemixDatasource: function() {
-    if (this.options.bluemix) { ds.selectBluemixDatasource(this, g); }
+  selectBluemixDatasource: function () {
+    if (this.options.bluemix) {
+      ds.selectBluemixDatasource(this, g);
+    }
   },
 
-  bindServiceToApp: function() {
+  bindServiceToApp: function () {
     if (this.options.bluemix) {
       ds.bindServiceToApp(this);
     }
   },
 
-  askForConfig: function() {
+  askForConfig: function () {
     var self = this;
     var settings = this.connectorSettings[this.connector];
+
     this.settings = {};
     if (!settings) {
       return;
     }
+    if (this.type) {
+      if (this.listOfAvailableConnectorsValues().includes(this.type)) {
+        if (this.options.automate) {
+          if (this.type == 'postgresql') {
+            this.settings = {
+              url: '${POSTGRESQL_CONNECTION_STRING}',
+              // host: 'localhost',
+              // port: '5432',
+              // user: this.name,
+              // password: this.name,
+              // database: this.name,
+            };
+            return;
+          }
+        }
+      } else {
+        this.env.error('Invalid type of connecto sent as argument');
+      }
+    }
 
     var warnings = [];
-    var reportWarnings = function() {
-      warnings.forEach(function(w) {
+    var reportWarnings = function () {
+      warnings.forEach(function (w) {
         self.log(chalk.gray(w));
       });
     };
 
     var prompts = [];
     for (var key in settings) {
-      if (this.options.bluemix &&
-        ['database', 'db', 'modelIndex'].indexOf(key) < 0) {
+      if (this.options.bluemix && ['database', 'db', 'modelIndex'].indexOf(key) < 0) {
         continue;
       }
       var prop = settings[key];
@@ -215,7 +269,7 @@ module.exports = yeoman.Base.extend({
 
     if (!prompts.length) return reportWarnings();
 
-    return this.prompt(prompts).then(function(props) {
+    return this.prompt(prompts).then(function (props) {
       for (var key in settings) {
         var propType = settings[key].type;
         if (propType === 'number') {
@@ -233,7 +287,7 @@ module.exports = yeoman.Base.extend({
     }.bind(this));
   },
 
-  installConnector: function() {
+  installConnector: function () {
     var connector = this.availableConnectors[this.connector];
     var pkg = {};
     if (connector) {
@@ -256,18 +310,26 @@ module.exports = yeoman.Base.extend({
 
     var done = this.async();
 
-    var prompts = [
-      {
-        name: 'installConnector',
-        message: g.f('Install %s', npmModule),
-        type: 'confirm',
-        default: true,
-      },
-    ];
+    var prompts = [{
+      name: 'installConnector',
+      message: g.f('Install %s', npmModule),
+      type: 'confirm',
+      default: true,
+    }, ];
 
-    return this.prompt(prompts).then(function(props) {
+    if (this.options.automate) {
+      this.npmInstall([npmModule], {
+        'save': true
+      });
+      done();
+      return;
+    }
+
+    return this.prompt(prompts).then(function (props) {
       if (props.installConnector) {
-        this.npmInstall([npmModule], {'save': true});
+        this.npmInstall([npmModule], {
+          'save': true
+        });
         done();
       } else {
         var moduleVersion = npmModule.split('@');
@@ -280,7 +342,7 @@ module.exports = yeoman.Base.extend({
     }.bind(this));
   },
 
-  dataSource: function() {
+  dataSource: function () {
     if (this.abort) return;
     var done = this.async();
     var config = extend(this.settings, {
@@ -298,19 +360,21 @@ module.exports = yeoman.Base.extend({
     if (this.options.bluemix) {
       ds.addDatasource(this, config);
     } else {
-      wsModels.DataSourceDefinition.create(config, function(err) {
+      wsModels.DataSourceDefinition.create(config, function (err) {
         helpers.reportValidationError(err, this.log);
         return done(err);
       }.bind(this));
     }
   },
 
-  updatePipeline: function() {
+  updatePipeline: function () {
     if (this.abort) return;
-    if (this.options.bluemix) { ds.updatePipeline(this); }
+    if (this.options.bluemix) {
+      ds.updatePipeline(this);
+    }
   },
 
-  printAddConfigForCustomConnector: function() {
+  printAddConfigForCustomConnector: function () {
     if (this.abort) return;
     var connector = this.connector;
     if (!this.availableConnectors[connector]) {

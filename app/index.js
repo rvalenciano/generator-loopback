@@ -133,6 +133,11 @@ module.exports = yeoman.Base.extend({
 
     var name = this.name || this.dir || this.appname;
 
+    if (this.options.automate) {
+      this.appname = this.name;
+      return;
+    }
+
     var prompts = [{
       name: 'appname',
       message: g.f('What\'s the name of your application?'),
@@ -173,6 +178,11 @@ module.exports = yeoman.Base.extend({
     }];
 
     var self = this;
+
+    if (this.options.automate) {
+      this.options.loopbackVersion = this.default;
+      return;
+    }
     return this.prompt(prompts).then(function (answers) {
       self.options.loopbackVersion = answers.loopbackVersion;
     }.bind(this));
@@ -195,7 +205,10 @@ module.exports = yeoman.Base.extend({
       default: this.defaultTemplate,
       choices: this.templates,
     }];
-
+    if (this.options.automate) {
+      this.wsTemplate = this.defaultTemplate;
+      return;
+    }
     var self = this;
     return this.prompt(prompts).then(function (answers) {
       // Do NOT use name template as it's a method in the base class

@@ -33,7 +33,7 @@ module.exports = yeoman.Base.extend({
   // as loopback-workspace is editing (modifying) files when
   // saving project changes.
 
-  constructor: function() {
+  constructor: function () {
     yeoman.Base.apply(this, arguments);
 
     this.argument('url', {
@@ -41,9 +41,15 @@ module.exports = yeoman.Base.extend({
       required: false,
       type: String,
     });
+
+    this.option('automate', {
+      desc: g.f('Scaffold swagger automatically from path sent as argument.'),
+      required: false,
+      type: String,
+    });
   },
 
-  help: function() {
+  help: function () {
     return helpText.customHelp(this, 'loopback_swagger_usage.txt');
   },
 
@@ -52,24 +58,30 @@ module.exports = yeoman.Base.extend({
   loadDataSources: actions.loadDataSources,
   addNullDataSourceItem: actions.addNullDataSourceItem,
 
-  askForSpecUrlOrPath: function() {
-    var prompts = [
-      {
-        name: 'url',
-        message: g.f('Enter the swagger spec url or file path:'),
-        default: this.url,
-        validate: validateUrlOrFile,
-      },
-    ];
-    return this.prompt(prompts).then(function(answers) {
+  askForSpecUrlOrPath: function () {
+    if (this.url && this.options.automate) {
+      if (validateUrlOrFile(this.url)) {
+        this.url = this.url;
+        return;
+      } else {
+        this.env.error('Invalid swagger url or path');
+      }
+    }
+    var prompts = [{
+      name: 'url',
+      message: g.f('Enter the swagger spec url or file path:'),
+      default: this.url,
+      validate: validateUrlOrFile,
+    }];
+    return this.prompt(prompts).then(function (answers) {
       this.url = answers.url.trim();
     }.bind(this));
   },
 
-  swagger: function() {
+  swagger: function () {
     var self = this;
     var done = this.async();
-    loadSwaggerSpecs(this.url, this.log, function(err, apis) {
+    loadSwaggerSpecs(this.url, this.log, function (err, apis) {
       if (err) {
         done(err);
       } else {
@@ -79,7 +91,7 @@ module.exports = yeoman.Base.extend({
     });
   },
 
-  checkModels: function() {
+  checkModels: function () {
     var self = this;
     var done = this.async();
 
@@ -115,7 +127,7 @@ module.exports = yeoman.Base.extend({
           properties: model.properties,
         });
         var tags = api.spec.tags || [];
-        var found = tags.some(function(t) {
+        var found = tags.some(function (t) {
           return t.name === m;
         });
         self.modelConfigs.push({
@@ -127,35 +139,46 @@ module.exports = yeoman.Base.extend({
     }
 
     this.selectedModels = {};
-    this.modelNames.forEach(function(m) {
+    this.modelNames.forEach(function (m) {
       self.selectedModels[m] = NOT_SELECTED;
     });
 
     async.parallel([
-      function(done) {
+        function (done) {
           // Find existing model definitions
-        wsModels.ModelDefinition.find(
-            {where: {name: {inq: self.modelNames}}}, done);
-      },
-      function(done) {
-        wsModels.ModelConfig.find(
-            {where: {name: {inq: self.modelNames}}}, done);
-      }],
-      function(err, objs) {
+          wsModels.ModelDefinition.find({
+            where: {
+              name: {
+                inq: self.modelNames
+              }
+            }
+          }, done);
+        },
+        function (done) {
+          wsModels.ModelConfig.find({
+            where: {
+              name: {
+                inq: self.modelNames
+              }
+            }
+          }, done);
+        }
+      ],
+      function (err, objs) {
         if (err) {
           helpers.reportValidationError(err, self.log);
           return done(err);
         }
 
-        objs[0].forEach(function(d) {
+        objs[0].forEach(function (d) {
           self.selectedModels[d.name] = CONFLICT_DETECTED;
         });
 
-        objs[1].forEach(function(c) {
+        objs[1].forEach(function (c) {
           self.selectedModels[c.name] = CONFLICT_DETECTED;
         });
 
-        var choices = Object.keys(self.selectedModels).map(function(m) {
+        var choices = Object.keys(self.selectedModels).map(function (m) {
           var flag = self.selectedModels[m];
           return {
             name: m + ((flag === CONFLICT_DETECTED) ? ' (!)' : ''),
@@ -165,8 +188,34 @@ module.exports = yeoman.Base.extend({
           };
         });
 
-        var prompts = [
-          {
+        if (self.options.automate) {
+          if (self.hasDatasources) {
+            var found = self.dataSources.some(function (ds) {
+              return ds._connector === 'postgresql';
+            });
+            if (found) {
+              self.dataSource = 'postgresql';
+            } else {
+              // default to 1st one
+              self.dataSource = self.dataSources[0].value;
+            }
+          }
+          choices.forEach(function (m) {
+            for (var i = 0, n = choices.length; i < n; i++) {
+              var c = choices[i];
+              if (c.name === m.name) {
+                self.selectedModels[c.modelName] =
+                  (c.flag === CONFLICT_DETECTED ?
+                    SELECTED_FOR_UPDATE : SELECTED_FOR_CREATE);
+                break;
+              }
+            }
+          });
+          done();
+          return;
+        }
+
+        var prompts = [{
             name: 'modelSelections',
             message: g.f('Select models to be generated:'),
             type: 'checkbox',
@@ -180,9 +229,9 @@ module.exports = yeoman.Base.extend({
             choices: self.dataSources,
           },
         ];
-        return self.prompt(prompts).then(function(answers) {
+        return self.prompt(prompts).then(function (answers) {
           self.dataSource = answers.dataSource;
-          answers.modelSelections.forEach(function(m) {
+          answers.modelSelections.forEach(function (m) {
             for (var i = 0, n = choices.length; i < n; i++) {
               var c = choices[i];
               if (c.name === m) {
@@ -193,12 +242,11 @@ module.exports = yeoman.Base.extend({
               }
             }
           });
-          done();
         });
       });
   },
 
-  generateApis: function() {
+  generateApis: function () {
     var self = this;
     var found = false;
     for (var m in this.selectedModels) {
@@ -223,24 +271,25 @@ module.exports = yeoman.Base.extend({
         }
         var propertyNames = Object.keys(modelDef.properties);
         if (propertyNames.length > 0) {
-          result.properties.destroyAll(function(err) {
+          result.properties.destroyAll(function (err) {
             if (err) {
               return cb(err);
             }
             // 2. Create model properties one by one
             async.eachSeries(propertyNames,
-              function(m, done) {
+              function (m, done) {
                 modelDef.properties[m].name = m;
                 // FIXME: [rfeng] Can we automate the inheritance of facetName?
                 modelDef.properties[m].facetName = result.facetName;
                 result.properties.create(modelDef.properties[m],
-                  function(err) {
+                  function (err) {
                     return done(err);
                   });
-              }, function(err) {
+              },
+              function (err) {
                 if (!err) {
                   self.log(chalk.green(g.f('Model definition created/updated ' +
-                  'for %s.', modelDef.name)));
+                    'for %s.', modelDef.name)));
                 }
                 cb(err);
               });
@@ -251,7 +300,6 @@ module.exports = yeoman.Base.extend({
           cb();
         }
       }
-
       if (self.selectedModels[modelDef.name] === SELECTED_FOR_UPDATE) {
         self.log(chalk.green(g.f('Updating model definition for %s...',
           modelDef.name)));
@@ -276,7 +324,7 @@ module.exports = yeoman.Base.extend({
         self.log(chalk.green(g.f('Updating model config for %s...',
           config.name)));
         config.id = wsModels.ModelDefinition.getUniqueId(config);
-        wsModels.ModelConfig.upsert(config, function(err) {
+        wsModels.ModelConfig.upsert(config, function (err) {
           if (!err) {
             self.log(chalk.green(g.f('Model config updated for %s.',
               config.name)));
@@ -286,7 +334,7 @@ module.exports = yeoman.Base.extend({
       } else if (self.selectedModels[config.name] === SELECTED_FOR_CREATE) {
         self.log(chalk.green(g.f('Creating model config for %s...',
           config.name)));
-        wsModels.ModelConfig.create(config, function(err) {
+        wsModels.ModelConfig.create(config, function (err) {
           if (!err) {
             self.log(chalk.green(g.f('Model config created for %s.',
               config.name)));
@@ -301,8 +349,8 @@ module.exports = yeoman.Base.extend({
 
     function generateRemoteMethods(self, cb) {
       var apis = self.apis;
-      async.eachSeries(apis, function(api, done) {
-        async.forEachOf(api.code, function(code, m, done) {
+      async.eachSeries(apis, function (api, done) {
+        async.forEachOf(api.code, function (code, m, done) {
           if (self.selectedModels[m] !== SELECTED_FOR_UPDATE &&
             self.selectedModels[m] !== SELECTED_FOR_CREATE) {
             return done();
@@ -326,24 +374,24 @@ module.exports = yeoman.Base.extend({
     function generateApis(self, cb) {
       async.series([
         // Create model definitions
-        function(done) {
-          async.each(self.modelDefs, function(def, cb) {
+        function (done) {
+          async.each(self.modelDefs, function (def, cb) {
             createModel(self, def, cb);
           }, done);
         },
         // Create model configurations
-        function(done) {
-          async.each(self.modelConfigs, function(config, cb) {
+        function (done) {
+          async.each(self.modelConfigs, function (config, cb) {
             createModelConfig(self, config, cb);
           }, done);
         },
-        function(done) {
+        function (done) {
           generateRemoteMethods(self, done);
         },
       ], cb);
     }
 
-    generateApis(self, function(err) {
+    generateApis(self, function (err) {
       if (!err) {
         self.log(
           chalk.green(g.f('Models are successfully generated from ' +
